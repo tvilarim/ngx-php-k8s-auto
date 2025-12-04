@@ -1,56 +1,56 @@
-name: Deploy to AWS EKS
+# name: Deploy to AWS EKS
 
-on:
-  push:
-    branches: [ "main" ]
+# on:
+#   push:
+#     branches: [ "main" ]
 
-env:
-  AWS_REGION: us-east-1                   # Your AWS region
-  ECR_REPOSITORY: my-html-app-repo        # Your ECR Repo name
-  EKS_CLUSTER_NAME: my-learning-cluster   # Your EKS Cluster name
+# env:
+#   AWS_REGION: us-east-1                   # Your AWS region
+#   ECR_REPOSITORY: my-html-app-repo        # Your ECR Repo name
+#   EKS_CLUSTER_NAME: my-learning-cluster   # Your EKS Cluster name
 
-jobs:
-  deploy:
-    name: Build & Deploy
-    runs-on: ubuntu-latest
+# jobs:
+#   deploy:
+#     name: Build & Deploy
+#     runs-on: ubuntu-latest
 
-    steps:
-    # 1. Check out the code from GitHub
-    - name: Checkout Code
-      uses: actions/checkout@v3
+#     steps:
+#     # 1. Check out the code from GitHub
+#     - name: Checkout Code
+#       uses: actions/checkout@v3
 
-    # 2. Log in to AWS
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v1
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+#     # 2. Log in to AWS
+#     - name: Configure AWS credentials
+#       uses: aws-actions/configure-aws-credentials@v1
+#       with:
+#         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#         aws-region: ${{ env.AWS_REGION }}
 
-    # 3. Log in to Amazon ECR (Private Docker Registry)
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v1
+#     # 3. Log in to Amazon ECR (Private Docker Registry)
+#     - name: Login to Amazon ECR
+#       id: login-ecr
+#       uses: aws-actions/amazon-ecr-login@v1
 
-    # 4. Build, tag, and push image to Amazon ECR
-    - name: Build, tag, and push image to Amazon ECR
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: ${{ github.sha }} # Use Git Commit SHA for versioning
-      run: |
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+#     # 4. Build, tag, and push image to Amazon ECR
+#     - name: Build, tag, and push image to Amazon ECR
+#       env:
+#         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+#         IMAGE_TAG: ${{ github.sha }} # Use Git Commit SHA for versioning
+#       run: |
+#         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+#         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
-    # 5. Update Kubeconfig (Connects the runner to your cluster)
-    - name: Update kubeconfig
-      run: aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_REGION
+#     # 5. Update Kubeconfig (Connects the runner to your cluster)
+#     - name: Update kubeconfig
+#       run: aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_REGION
 
-    # 6. Deploy to Kubernetes
-    # We use 'envsubst' to replace the variables in deployment.yaml with actual values
-    - name: Deploy to EKS
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: ${{ github.sha }}
-      run: |
-        envsubst < k8s/deployment.yaml | kubectl apply -f -
-        kubectl rollout status deployment/my-static-site
+#     # 6. Deploy to Kubernetes
+#     # We use 'envsubst' to replace the variables in deployment.yaml with actual values
+#     - name: Deploy to EKS
+#       env:
+#         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+#         IMAGE_TAG: ${{ github.sha }}
+#       run: |
+#         envsubst < k8s/deployment.yaml | kubectl apply -f -
+#         kubectl rollout status deployment/my-static-site
