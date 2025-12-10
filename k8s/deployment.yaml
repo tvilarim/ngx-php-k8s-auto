@@ -3,7 +3,9 @@ kind: Deployment
 metadata:
   name: my-static-site
 spec:
-  replicas: 2 # Run 2 copies for high availability
+  # LOW COST: 1 replica is enough for testing. 
+  # 2 replicas on 1 node provides no extra reliability anyway.
+  replicas: 1 
   selector:
     matchLabels:
       app: my-static-site
@@ -14,20 +16,29 @@ spec:
     spec:
       containers:
       - name: web-server
-        # This placeholder will be replaced by the pipeline
         image: ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
         ports:
         - containerPort: 80
+        # LOW COST: Define small limits so it fits on a t3.small
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: my-static-site-service
 spec:
-  type: LoadBalancer # Requests a public IP from AWS
+  # LOW COST: 'ClusterIP' is free. 
+  # 'LoadBalancer' costs ~$18/month.
+  type: ClusterIP
   selector:
     app: my-static-site
   ports:
     - protocol: TCP
-      port: 80 # External port
-      targetPort: 80 # Container port
+      port: 80
+      targetPort: 80
