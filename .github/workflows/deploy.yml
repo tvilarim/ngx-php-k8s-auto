@@ -1,13 +1,16 @@
-name: Deploy to AWS EKS
+name: Deploy to Free Tier EC2 (K3s)
 
 on:
   push:
     branches: [ "main" ]
 
 env:
-  AWS_REGION: us-east-1                   # Your AWS region
-  ECR_REPOSITORY: my-html-app-repo        # Your ECR Repo name
-  EKS_CLUSTER_NAME: my-learning-cluster   # Your EKS Cluster name
+  # US-EAST-1 is mandatory for ECR Public
+  AWS_REGION: us-east-1
+  # We will use Public ECR to avoid complex authentication issues on the free node
+  ECR_REPOSITORY: public.ecr.aws/a1b2c3d4/my-html-app-repo
+  CONTAINER_NAME: web-server
+  DEPLOYMENT_NAME: my-static-site
 
 jobs:
   deploy:
@@ -15,11 +18,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. Check out the code from GitHub
     - name: Checkout Code
       uses: actions/checkout@v3
 
-    # 2. Log in to AWS
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v1
       with:
@@ -27,30 +28,81 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
 
-    # 3. Log in to Amazon ECR (Private Docker Registry)
-    - name: Login to Amazon ECR
-      id: login-ecr
+    # 1. Login to AWS ECR Public (Free & Easier)
+    - name: Login to Amazon ECR Public
+      id: login-ecr-public
       uses: aws-actions/amazon-ecr-login@v1
+      with:
+        registry-type: public
 
-    # 4. Build, tag, and push image to Amazon ECR
-    - name: Build, tag, and push image to Amazon ECR
+    # 2. Build and Push to Public ECR
+    - name: Build, tag, and push image
       env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: ${{ github.sha }} # Use Git Commit SHA for versioning
-      run: |
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-
-    # 5. Update Kubeconfig (Connects the runner to your cluster)
-    - name: Update kubeconfig
-      run: aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_REGION
-
-    # 6. Deploy to Kubernetes
-    # We use 'envsubst' to replace the variables in deployment.yaml with actual values
-    - name: Deploy to EKS
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
+        ECR_ALIAS: ${{ secrets.ECR_ALIAS }} # We will get this alias in setup
         IMAGE_TAG: ${{ github.sha }}
       run: |
-        envsubst < k8s/deployment.yaml | kubectl apply -f -
-        kubectl rollout status deployment/my-static-site
+        docker build -t $ECR_REGISTRY/$ECR_ALIAS/my-html-app-repo:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$ECR_ALIAS/my-html-app-repo:$IMAGE_TAG
+
+    # 3. Deploy to EC2 via SSH
+    - name: Deploy to EC2 (K3s)
+      uses: appleboy/ssh-action@master
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
+        ECR_ALIAS: ${{ secrets.ECR_ALIAS }}
+        IMAGE_TAG: ${{ github.sha }}
+      with:
+        host: ${{ secrets.EC2_HOST }}     # Your EC2 Public IP
+        username: ubuntu                  # Default user for Ubuntu AMIs
+        key: ${{ secrets.EC2_SSH_KEY }}   # Your private .pem key content
+        envs: ECR_REGISTRY,ECR_ALIAS,IMAGE_TAG,CONTAINER_NAME,DEPLOYMENT_NAME
+        script: |
+          # Create the deployment file on the server dynamically
+          cat <<EOF > deployment.yaml
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: $DEPLOYMENT_NAME
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: $DEPLOYMENT_NAME
+            template:
+              metadata:
+                labels:
+                  app: $DEPLOYMENT_NAME
+              spec:
+                containers:
+                - name: $CONTAINER_NAME
+                  image: $ECR_REGISTRY/$ECR_ALIAS/my-html-app-repo:$IMAGE_TAG
+                  ports:
+                  - containerPort: 80
+                  resources:
+                    requests:
+                      memory: "64Mi"
+                      cpu: "50m"
+                    limits:
+                      memory: "128Mi"
+                      cpu: "100m"
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: my-service
+          spec:
+            type: ClusterIP
+            selector:
+              app: $DEPLOYMENT_NAME
+            ports:
+            - protocol: TCP
+              port: 80
+              targetPort: 80
+          EOF
+          
+          # Apply the file to K3s
+          sudo k3s kubectl apply -f deployment.yaml
+          
+          # Force a restart to ensure new image is picked up immediately
+          sudo k3s kubectl rollout restart deployment/$DEPLOYMENT_NAME
