@@ -118,8 +118,21 @@ jobs:
               targetPort: 80
           EOF
           
-          # Apply with validation disabled and increased timeout (5m) to prevent timeouts on t2.micro
-          sudo k3s kubectl apply -f deployment.yaml --validate=false --request-timeout=300s
+          # Apply with validation disabled and increased timeout
+          # We use a retry loop to be robust against t2.micro CPU spikes
+          n=0
+          until [ "$n" -ge 5 ]
+          do
+             echo "Applying deployment... (Attempt $((n+1))/5)"
+             sudo k3s kubectl apply -f deployment.yaml --validate=false --request-timeout=300s && break
+             n=$((n+1))
+             echo "Apply failed. Retrying in 10 seconds..."
+             sleep 10
+          done
           
-          # Force a restart with timeout
-          sudo k3s kubectl rollout restart deployment/$DEPLOYMENT_NAME --request-timeout=300s
+          if [ "$n" -ge 5 ]; then
+             echo "Deployment failed after 5 attempts."
+             exit 1
+          fi
+          
+          echo "Deployment successful! The Pod will update automatically because the Image Tag changed."
