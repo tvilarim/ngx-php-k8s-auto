@@ -71,6 +71,7 @@ jobs:
         host: ${{ secrets.EC2_HOST }}
         username: ubuntu
         key: ${{ secrets.EC2_SSH_KEY }}
+        command_timeout: 30m # Increased timeout to prevent GitHub from killing the step
         envs: CONTAINER_NAME,DEPLOYMENT_NAME
         script: |
           IMAGE_URI="${{ steps.build-image.outputs.image_uri }}"
@@ -118,13 +119,13 @@ jobs:
               targetPort: 80
           EOF
           
-          # Apply with validation disabled and increased timeout
-          # We use a retry loop to be robust against t2.micro CPU spikes
+          # Apply with Server-Side Apply
+          # This avoids the "GET" request that is timing out by sending the config directly to the server
           n=0
           until [ "$n" -ge 5 ]
           do
              echo "Applying deployment... (Attempt $((n+1))/5)"
-             sudo k3s kubectl apply -f deployment.yaml --validate=false --request-timeout=300s && break
+             sudo k3s kubectl apply -f deployment.yaml --server-side --force-conflicts --validate=false --request-timeout=300s && break
              n=$((n+1))
              echo "Apply failed. Retrying in 10 seconds..."
              sleep 10
