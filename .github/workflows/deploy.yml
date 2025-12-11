@@ -33,7 +33,7 @@ jobs:
       with:
         registry-type: public
 
-    # 2. NEW STEP: Explicitly get the Registry URI (Fixes the 404 error)
+    # 2. NEW STEP: Explicitly get the Registry URI (Avoid the 404 error)
     - name: Get ECR Registry Alias
       id: get-registry-uri
       run: |
@@ -118,6 +118,8 @@ jobs:
               targetPort: 80
           EOF
           
-          # Apply
-          sudo k3s kubectl apply -f deployment.yaml
+          # Apply with validation disabled to prevent timeouts on t2.micro
+          sudo k3s kubectl apply -f deployment.yaml --validate=false
+          
+          # Force a restart
           sudo k3s kubectl rollout restart deployment/$DEPLOYMENT_NAME
