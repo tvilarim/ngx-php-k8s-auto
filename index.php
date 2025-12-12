@@ -18,8 +18,8 @@ $hostname = gethostname();
         <p>Served by Nginx.</p>
         <p>Running on Pod: <span class="pod"><?php echo $hostname; ?></span></p>
         <hr>
-        <!-- <small>PHP Version: <?php echo phpversion(); ?></small> -->
-        <small>PHP Version: <?php echo "Not of your business"; ?></small>
+        <small>PHP Version: <?php echo phpversion(); ?></small>
+        <!-- <small>PHP Version: <?php echo "Not of your business"; ?></small> -->
     </div>
 </body>
 </html>
