@@ -1,4 +1,4 @@
-name: Deploy to Free Tier EC2 (K3s)
+name: Deploy to EC2 (K3s)
 
 on:
   push:
@@ -33,45 +33,40 @@ jobs:
       with:
         registry-type: public
 
-    # 2. NEW STEP: Explicitly get the Registry URI
+    # 2. Get Registry URI
     - name: Get ECR Registry Alias
       id: get-registry-uri
       run: |
-        # Fetch the correct public URI (e.g., public.ecr.aws/z4k2r1m9)
         REGISTRY_URI=$(aws ecr-public describe-registries --region us-east-1 --query 'registries[0].registryUri' --output text)
         echo "REGISTRY_URI=$REGISTRY_URI" >> $GITHUB_ENV
-        echo "Found Registry URI: $REGISTRY_URI"
 
-    # 3. AUTO-CREATE REPO
+    # 3. Ensure Repo Exists
     - name: Ensure ECR Repository Exists
       run: |
         aws ecr-public describe-repositories --repository-names ${{ env.REPO_NAME }} --region us-east-1 > /dev/null 2>&1 || \
         aws ecr-public create-repository --repository-name ${{ env.REPO_NAME }} --region us-east-1
 
-    # 4. Build and Push (Using the explicit REGISTRY_URI)
+    # 4. Build and Push
     - name: Build, tag, and push image
       id: build-image
       env:
         IMAGE_TAG: ${{ github.sha }}
       run: |
-        # Construct the proper URL: public.ecr.aws/ALIAS/REPO_NAME:TAG
         IMAGE_URI="${{ env.REGISTRY_URI }}/${{ env.REPO_NAME }}:$IMAGE_TAG"
         
         echo "Pushing to: $IMAGE_URI"
-        
         docker build -t $IMAGE_URI .
         docker push $IMAGE_URI
         
         echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
 
-    # 5. Deploy to EC2 via SSH
+    # 5. Deploy to EC2 (Fast & Clean)
     - name: Deploy to EC2 (K3s)
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.EC2_HOST }}
         username: ubuntu
         key: ${{ secrets.EC2_SSH_KEY }}
-        command_timeout: 30m # Increased timeout to prevent GitHub from killing the step
         envs: CONTAINER_NAME,DEPLOYMENT_NAME
         script: |
           IMAGE_URI="${{ steps.build-image.outputs.image_uri }}"
@@ -99,11 +94,11 @@ jobs:
                   - containerPort: 80
                   resources:
                     requests:
-                      memory: "64Mi"
-                      cpu: "50m"
-                    limits:
-                      memory: "128Mi"
+                      memory: "128Mi"  # Increased limits for better performance
                       cpu: "100m"
+                    limits:
+                      memory: "256Mi"
+                      cpu: "200m"
           ---
           apiVersion: v1
           kind: Service
@@ -119,21 +114,8 @@ jobs:
               targetPort: 80
           EOF
           
-          # Apply with Server-Side Apply
-          # This avoids the "GET" request that is timing out by sending the config directly to the server
-          n=0
-          until [ "$n" -ge 5 ]
-          do
-             echo "Applying deployment... (Attempt $((n+1))/5)"
-             sudo k3s kubectl apply -f deployment.yaml --server-side --force-conflicts --validate=false --request-timeout=300s && break
-             n=$((n+1))
-             echo "Apply failed. Retrying in 10 seconds..."
-             sleep 10
-          done
+          # Standard Kubernetes Apply (No more hacks needed)
+          sudo k3s kubectl apply -f deployment.yaml
           
-          if [ "$n" -ge 5 ]; then
-             echo "Deployment failed after 5 attempts."
-             exit 1
-          fi
-          
-          echo "Deployment successful! The Pod will update automatically because the Image Tag changed."
+          # Force rollout to pick up the new image immediately
+          sudo k3s kubectl rollout status deployment/$DEPLOYMENT_NAME
