@@ -71,7 +71,7 @@ jobs:
         script: |
           IMAGE_URI="${{ steps.build-image.outputs.image_uri }}"
           
-          # Create Deployment YAML
+          # Create Deployment YAML (Deployment + Service + Ingress)
           cat <<EOF > deployment.yaml
           apiVersion: apps/v1
           kind: Deployment
@@ -94,7 +94,7 @@ jobs:
                   - containerPort: 80
                   resources:
                     requests:
-                      memory: "128Mi"  # Increased limits for better performance
+                      memory: "128Mi"
                       cpu: "100m"
                     limits:
                       memory: "256Mi"
@@ -112,9 +112,25 @@ jobs:
             - protocol: TCP
               port: 80
               targetPort: 80
+          ---
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: my-ingress
+          spec:
+            rules:
+            - http:
+                paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: my-service
+                      port:
+                        number: 80
           EOF
           
-          # Standard Kubernetes Apply (No more hacks needed)
+          # Standard Kubernetes Apply
           sudo k3s kubectl apply -f deployment.yaml
           
           # Force rollout to pick up the new image immediately
